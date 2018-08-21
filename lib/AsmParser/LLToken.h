@@ -371,7 +371,11 @@ enum Kind {
   Type,
 
   APFloat, // APFloatVal
-  APSInt   // APSInt
+  APSInt,   // APSInt
+
+  // Aurze Script
+   kw_get,
+   kw_set 
 };
 } // end namespace lltok
 } // end namespace llvm
