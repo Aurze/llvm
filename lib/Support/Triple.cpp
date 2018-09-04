@@ -168,6 +168,7 @@ StringRef Triple::getVendorTypeName(VendorType Kind) {
   case AMD: return "amd";
   case Mesa: return "mesa";
   case SUSE: return "suse";
+  case OpenEmbedded: return "oe";
   }
 
   llvm_unreachable("Invalid VendorType!");
@@ -208,6 +209,7 @@ StringRef Triple::getOSTypeName(OSType Kind) {
   case Mesa3D: return "mesa3d";
   case Contiki: return "contiki";
   case AMDPAL: return "amdpal";
+  case HermitCore: return "hermit";
   }
 
   llvm_unreachable("Invalid OSType");
@@ -232,9 +234,7 @@ StringRef Triple::getEnvironmentTypeName(EnvironmentType Kind) {
   case MSVC: return "msvc";
   case Itanium: return "itanium";
   case Cygnus: return "cygnus";
-  case AMDOpenCL: return "amdopencl";
   case CoreCLR: return "coreclr";
-  case OpenCL: return "opencl";
   case Simulator: return "simulator";
   }
 
@@ -384,7 +384,7 @@ static Triple::ArchType parseArch(StringRef ArchName) {
     // FIXME: Do we need to support these?
     .Cases("i786", "i886", "i986", Triple::x86)
     .Cases("amd64", "x86_64", "x86_64h", Triple::x86_64)
-    .Cases("powerpc", "ppc32", Triple::ppc)
+    .Cases("powerpc", "ppc", "ppc32", Triple::ppc)
     .Cases("powerpc64", "ppu", "ppc64", Triple::ppc64)
     .Cases("powerpc64le", "ppc64le", Triple::ppc64le)
     .Case("xscale", Triple::arm)
@@ -465,6 +465,7 @@ static Triple::VendorType parseVendor(StringRef VendorName) {
     .Case("amd", Triple::AMD)
     .Case("mesa", Triple::Mesa)
     .Case("suse", Triple::SUSE)
+    .Case("oe", Triple::OpenEmbedded)
     .Default(Triple::UnknownVendor);
 }
 
@@ -502,6 +503,7 @@ static Triple::OSType parseOS(StringRef OSName) {
     .StartsWith("mesa3d", Triple::Mesa3D)
     .StartsWith("contiki", Triple::Contiki)
     .StartsWith("amdpal", Triple::AMDPAL)
+    .StartsWith("hermit", Triple::HermitCore)
     .Default(Triple::UnknownOS);
 }
 
@@ -523,9 +525,7 @@ static Triple::EnvironmentType parseEnvironment(StringRef EnvironmentName) {
     .StartsWith("msvc", Triple::MSVC)
     .StartsWith("itanium", Triple::Itanium)
     .StartsWith("cygnus", Triple::Cygnus)
-    .StartsWith("amdopencl", Triple::AMDOpenCL)
     .StartsWith("coreclr", Triple::CoreCLR)
-    .StartsWith("opencl", Triple::OpenCL)
     .StartsWith("simulator", Triple::Simulator)
     .Default(Triple::UnknownEnvironment);
 }
@@ -594,6 +594,8 @@ static Triple::SubArchType parseSubArch(StringRef SubArchName) {
     return Triple::ARMSubArch_v8_2a;
   case ARM::ArchKind::ARMV8_3A:
     return Triple::ARMSubArch_v8_3a;
+  case ARM::ArchKind::ARMV8_4A:
+    return Triple::ARMSubArch_v8_4a;
   case ARM::ArchKind::ARMV8R:
     return Triple::ARMSubArch_v8r;
   case ARM::ArchKind::ARMV8MBaseline:
@@ -670,8 +672,6 @@ static Triple::ObjectFormatType getDefaultFormat(const Triple &T) {
   case Triple::tce:
   case Triple::tcele:
   case Triple::thumbeb:
-  case Triple::wasm32:
-  case Triple::wasm64:
   case Triple::xcore:
     return Triple::ELF;
 
@@ -680,11 +680,15 @@ static Triple::ObjectFormatType getDefaultFormat(const Triple &T) {
     if (T.isOSDarwin())
       return Triple::MachO;
     return Triple::ELF;
+
+  case Triple::wasm32:
+  case Triple::wasm64:
+    return Triple::Wasm;
   }
   llvm_unreachable("unknown architecture");
 }
 
-/// \brief Construct a triple from the string representation provided.
+/// Construct a triple from the string representation provided.
 ///
 /// This stores the string representation and parses the various pieces into
 /// enum members.
@@ -713,7 +717,7 @@ Triple::Triple(const Twine &Str)
     ObjectFormat = getDefaultFormat(*this);
 }
 
-/// \brief Construct a triple from string representations of the architecture,
+/// Construct a triple from string representations of the architecture,
 /// vendor, and OS.
 ///
 /// This joins each argument into a canonical string representation and parses
@@ -729,7 +733,7 @@ Triple::Triple(const Twine &ArchStr, const Twine &VendorStr, const Twine &OSStr)
   ObjectFormat = getDefaultFormat(*this);
 }
 
-/// \brief Construct a triple from string representations of the architecture,
+/// Construct a triple from string representations of the architecture,
 /// vendor, OS, and environment.
 ///
 /// This joins each argument into a canonical string representation and parses
@@ -883,6 +887,12 @@ std::string Triple::normalize(StringRef Str) {
       Found[Pos] = true;
       break;
     }
+  }
+
+  // Replace empty components with "unknown" value.
+  for (unsigned i = 0, e = Components.size(); i < e; ++i) {
+    if (Components[i].empty())
+      Components[i] = "unknown";
   }
 
   // Special case logic goes here.  At this point Arch, Vendor and OS have the

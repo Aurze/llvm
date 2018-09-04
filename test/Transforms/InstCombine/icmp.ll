@@ -99,6 +99,16 @@ define i1 @test7(i32 %x) {
   ret i1 %b
 }
 
+define <2 x i1> @test7_vec(<2 x i32> %x) {
+; CHECK-LABEL: @test7_vec(
+; CHECK-NEXT:    [[B:%.*]] = icmp ne <2 x i32> [[X:%.*]], zeroinitializer
+; CHECK-NEXT:    ret <2 x i1> [[B]]
+;
+  %a = add <2 x i32> %x, <i32 -1, i32 -1>
+  %b = icmp ult <2 x i32> %a, %x
+  ret <2 x i1> %b
+}
+
 define i1 @test8(i32 %x) {
 ; CHECK-LABEL: @test8(
 ; CHECK-NEXT:    ret i1 false
@@ -106,6 +116,15 @@ define i1 @test8(i32 %x) {
   %a = add i32 %x, -1
   %b = icmp eq i32 %a, %x
   ret i1 %b
+}
+
+define <2 x i1> @test8_vec(<2 x i32> %x) {
+; CHECK-LABEL: @test8_vec(
+; CHECK-NEXT:    ret <2 x i1> zeroinitializer
+;
+  %a = add <2 x i32> %x, <i32 -1, i32 -1>
+  %b = icmp eq <2 x i32> %a, %x
+  ret <2 x i1> %b
 }
 
 define i1 @test9(i32 %x) {
@@ -118,6 +137,36 @@ define i1 @test9(i32 %x) {
   ret i1 %b
 }
 
+define <2 x i1> @test9_vec(<2 x i32> %x) {
+; CHECK-LABEL: @test9_vec(
+; CHECK-NEXT:    [[B:%.*]] = icmp ugt <2 x i32> [[X:%.*]], <i32 1, i32 1>
+; CHECK-NEXT:    ret <2 x i1> [[B]]
+;
+  %a = add <2 x i32> %x, <i32 -2, i32 -2>
+  %b = icmp ugt <2 x i32> %x, %a
+  ret <2 x i1> %b
+}
+
+define i1 @test9b(i32 %x) {
+; CHECK-LABEL: @test9b(
+; CHECK-NEXT:    [[B:%.*]] = icmp ult i32 [[X:%.*]], 2
+; CHECK-NEXT:    ret i1 [[B]]
+;
+  %a = add i32 %x, -2
+  %b = icmp ugt i32 %a, %x
+  ret i1 %b
+}
+
+define <2 x i1> @test9b_vec(<2 x i32> %x) {
+; CHECK-LABEL: @test9b_vec(
+; CHECK-NEXT:    [[B:%.*]] = icmp ult <2 x i32> [[X:%.*]], <i32 2, i32 2>
+; CHECK-NEXT:    ret <2 x i1> [[B]]
+;
+  %a = add <2 x i32> %x, <i32 -2, i32 -2>
+  %b = icmp ugt <2 x i32> %a, %x
+  ret <2 x i1> %b
+}
+
 define i1 @test10(i32 %x) {
 ; CHECK-LABEL: @test10(
 ; CHECK-NEXT:    [[B:%.*]] = icmp ne i32 %x, -2147483648
@@ -128,6 +177,36 @@ define i1 @test10(i32 %x) {
   ret i1 %b
 }
 
+define <2 x i1> @test10_vec(<2 x i32> %x) {
+; CHECK-LABEL: @test10_vec(
+; CHECK-NEXT:    [[B:%.*]] = icmp ne <2 x i32> [[X:%.*]], <i32 -2147483648, i32 -2147483648>
+; CHECK-NEXT:    ret <2 x i1> [[B]]
+;
+  %a = add <2 x i32> %x, <i32 -1, i32 -1>
+  %b = icmp slt <2 x i32> %a, %x
+  ret <2 x i1> %b
+}
+
+define i1 @test10b(i32 %x) {
+; CHECK-LABEL: @test10b(
+; CHECK-NEXT:    [[B:%.*]] = icmp eq i32 [[X:%.*]], -2147483648
+; CHECK-NEXT:    ret i1 [[B]]
+;
+  %a = add i32 %x, -1
+  %b = icmp sgt i32 %a, %x
+  ret i1 %b
+}
+
+define <2 x i1> @test10b_vec(<2 x i32> %x) {
+; CHECK-LABEL: @test10b_vec(
+; CHECK-NEXT:    [[B:%.*]] = icmp eq <2 x i32> [[X:%.*]], <i32 -2147483648, i32 -2147483648>
+; CHECK-NEXT:    ret <2 x i1> [[B]]
+;
+  %a = add <2 x i32> %x, <i32 -1, i32 -1>
+  %b = icmp sgt <2 x i32> %a, %x
+  ret <2 x i1> %b
+}
+
 define i1 @test11(i32 %x) {
 ; CHECK-LABEL: @test11(
 ; CHECK-NEXT:    ret i1 true
@@ -135,6 +214,15 @@ define i1 @test11(i32 %x) {
   %a = add nsw i32 %x, 8
   %b = icmp slt i32 %x, %a
   ret i1 %b
+}
+
+define <2 x i1> @test11_vec(<2 x i32> %x) {
+; CHECK-LABEL: @test11_vec(
+; CHECK-NEXT:    ret <2 x i1> <i1 true, i1 true>
+;
+  %a = add nsw <2 x i32> %x, <i32 8, i32 8>
+  %b = icmp slt <2 x i32> %x, %a
+  ret <2 x i1> %b
 }
 
 ; PR6195
@@ -543,6 +631,34 @@ define i1 @test36(i32 %x, i32 %y) {
   %rhs = sub nuw i32 %x, %y
   %c = icmp ugt i32 %x, %rhs
   ret i1 %c
+}
+
+; PR36969 - https://bugs.llvm.org/show_bug.cgi?id=36969
+
+define i1 @ugt_sub(i32 %xsrc, i32 %y) {
+; CHECK-LABEL: @ugt_sub(
+; CHECK-NEXT:    [[X:%.*]] = udiv i32 [[XSRC:%.*]], 42
+; CHECK-NEXT:    [[CMP:%.*]] = icmp ult i32 [[X]], [[Y:%.*]]
+; CHECK-NEXT:    ret i1 [[CMP]]
+;
+  %x = udiv i32 %xsrc, 42 ; thwart complexity-based canonicalization
+  %sub = sub i32 %x, %y
+  %cmp = icmp ugt i32 %sub, %x
+  ret i1 %cmp
+}
+
+; Swap operands and predicate. Try a vector type to verify that works too.
+
+define <2 x i1> @ult_sub(<2 x i8> %xsrc, <2 x i8> %y) {
+; CHECK-LABEL: @ult_sub(
+; CHECK-NEXT:    [[X:%.*]] = udiv <2 x i8> [[XSRC:%.*]], <i8 42, i8 -42>
+; CHECK-NEXT:    [[CMP:%.*]] = icmp ult <2 x i8> [[X]], [[Y:%.*]]
+; CHECK-NEXT:    ret <2 x i1> [[CMP]]
+;
+  %x = udiv <2 x i8> %xsrc, <i8 42, i8 -42> ; thwart complexity-based canonicalization
+  %sub = sub <2 x i8> %x, %y
+  %cmp = icmp ult <2 x i8> %x, %sub
+  ret <2 x i1> %cmp
 }
 
 ; X - Y > X - Z -> Z > Y if there is no overflow.
@@ -3275,9 +3391,9 @@ define i1 @knownbits8(i8 %a, i8 %b) {
 define i32 @abs_preserve(i32 %x) {
 ; CHECK-LABEL: @abs_preserve(
 ; CHECK-NEXT:    [[A:%.*]] = shl nsw i32 [[X:%.*]], 1
-; CHECK-NEXT:    [[C:%.*]] = icmp sgt i32 [[A]], -1
+; CHECK-NEXT:    [[C:%.*]] = icmp slt i32 [[A]], 0
 ; CHECK-NEXT:    [[NEGA:%.*]] = sub i32 0, [[A]]
-; CHECK-NEXT:    [[ABS:%.*]] = select i1 [[C]], i32 [[A]], i32 [[NEGA]]
+; CHECK-NEXT:    [[ABS:%.*]] = select i1 [[C]], i32 [[NEGA]], i32 [[A]]
 ; CHECK-NEXT:    ret i32 [[ABS]]
 ;
   %a = mul nsw i32 %x, 2
@@ -3302,3 +3418,27 @@ define i1 @PR35794(i32* %a) {
   ret i1 %cmp
 }
 
+; Don't crash by assuming the compared values are integers.
+define <2 x i1> @PR36583(<2 x i8*>)  {
+; CHECK-LABEL: @PR36583(
+; CHECK-NEXT:    [[RES:%.*]] = icmp eq <2 x i8*> %0, zeroinitializer
+; CHECK-NEXT:    ret <2 x i1> [[RES]]
+;
+  %cast = ptrtoint <2 x i8*> %0 to <2 x i64>
+  %res = icmp eq <2 x i64> %cast, zeroinitializer
+  ret <2 x i1> %res
+}
+
+; fold (icmp pred (sub (0, X)) C1) for vec type
+define <2 x i32> @Op1Negated_Vec(<2 x i32> %x) {
+; CHECK-LABEL: @Op1Negated_Vec(
+; CHECK-NEXT:    [[SUB:%.*]] = sub nsw <2 x i32> zeroinitializer, [[X:%.*]]
+; CHECK-NEXT:    [[CMP:%.*]] = icmp slt <2 x i32> [[X]], zeroinitializer
+; CHECK-NEXT:    [[COND:%.*]] = select <2 x i1> [[CMP]], <2 x i32> [[SUB]], <2 x i32> [[X]]
+; CHECK-NEXT:    ret <2 x i32> [[COND]]
+;
+  %sub = sub nsw <2 x i32> zeroinitializer, %x
+  %cmp = icmp sgt <2 x i32> %sub, <i32 -1, i32 -1>
+  %cond = select <2 x i1> %cmp, <2 x i32> %sub, <2 x i32> %x
+  ret <2 x i32> %cond
+}

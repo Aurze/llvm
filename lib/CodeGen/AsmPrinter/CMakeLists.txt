@@ -1,15 +1,15 @@
 add_llvm_library(LLVMAsmPrinter
+  AccelTable.cpp
   AddressPool.cpp
   ARMException.cpp
   AsmPrinter.cpp
   AsmPrinterDwarf.cpp
   AsmPrinterInlineAsm.cpp
-  DbgValueHistoryCalculator.cpp
+  DbgEntityHistoryCalculator.cpp
   DebugHandlerBase.cpp
   DebugLocStream.cpp
   DIE.cpp
   DIEHash.cpp
-  DwarfAccelTable.cpp
   DwarfCFIException.cpp
   DwarfCompileUnit.cpp
   DwarfDebug.cpp

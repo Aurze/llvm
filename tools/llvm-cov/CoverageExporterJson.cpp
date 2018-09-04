@@ -44,10 +44,10 @@
 #include "CoverageExporterJson.h"
 #include "CoverageReport.h"
 
-/// \brief The semantic version combined as a string.
+/// The semantic version combined as a string.
 #define LLVM_COVERAGE_EXPORT_JSON_STR "2.0.0"
 
-/// \brief Unique type identifier for JSON coverage export.
+/// Unique type identifier for JSON coverage export.
 #define LLVM_COVERAGE_EXPORT_JSON_TYPE_STR "llvm.coverage.json.export"
 
 using namespace llvm;
@@ -117,10 +117,13 @@ void CoverageExporterJson::emitArrayEnd() {
   OS << "]";
 }
 
-void CoverageExporterJson::renderRoot() {
+void CoverageExporterJson::renderRoot(
+    const CoverageFilters &IgnoreFilenameFilters) {
   std::vector<std::string> SourceFiles;
-  for (StringRef SF : Coverage.getUniqueSourceFiles())
-    SourceFiles.emplace_back(SF);
+  for (StringRef SF : Coverage.getUniqueSourceFiles()) {
+    if (!IgnoreFilenameFilters.matchesFilename(SF))
+      SourceFiles.emplace_back(SF);
+  }
   renderRoot(SourceFiles);
 }
 
@@ -209,46 +212,24 @@ void CoverageExporterJson::renderFiles(
   emitArrayStart();
 
   for (unsigned I = 0, E = SourceFiles.size(); I < E; ++I) {
-    // Render the file.
-    auto FileCoverage = Coverage.getCoverageForFile(SourceFiles[I]);
-    renderFile(FileCoverage, FileReports[I]);
+    renderFile(SourceFiles[I], FileReports[I]);
   }
 
   // End List of Files.
   emitArrayEnd();
 }
 
-void CoverageExporterJson::renderFile(
-    const coverage::CoverageData &FileCoverage,
-    const FileCoverageSummary &FileReport) {
+void CoverageExporterJson::renderFile(const std::string &Filename,
+                                      const FileCoverageSummary &FileReport) {
   // Start File.
   emitDictStart();
 
-  emitDictElement("filename", FileCoverage.getFilename());
+  emitDictElement("filename", Filename);
 
-  // Skip segments and expansions for summary-only export mode.
   if (!Options.ExportSummaryOnly) {
-    emitDictKey("segments");
-
-    // Start List of Segments.
-    emitArrayStart();
-
-    for (const auto &Segment : FileCoverage)
-      renderSegment(Segment);
-
-    // End List of Segments.
-    emitArrayEnd();
-
-    emitDictKey("expansions");
-
-    // Start List of Expansions.
-    emitArrayStart();
-
-    for (const auto &Expansion : FileCoverage.getExpansions())
-      renderExpansion(Expansion);
-
-    // End List of Expansions.
-    emitArrayEnd();
+    // Calculate and render detailed coverage information for given file.
+    auto FileCoverage = Coverage.getCoverageForFile(Filename);
+    renderFileCoverage(FileCoverage, FileReport);
   }
 
   emitDictKey("summary");
@@ -256,6 +237,33 @@ void CoverageExporterJson::renderFile(
 
   // End File.
   emitDictEnd();
+}
+
+
+void CoverageExporterJson::renderFileCoverage(
+    const coverage::CoverageData &FileCoverage,
+    const FileCoverageSummary &FileReport) {
+  emitDictKey("segments");
+
+  // Start List of Segments.
+  emitArrayStart();
+
+  for (const auto &Segment : FileCoverage)
+    renderSegment(Segment);
+
+  // End List of Segments.
+  emitArrayEnd();
+
+  emitDictKey("expansions");
+
+  // Start List of Expansions.
+  emitArrayStart();
+
+  for (const auto &Expansion : FileCoverage.getExpansions())
+    renderExpansion(Expansion);
+
+  // End List of Expansions.
+  emitArrayEnd();
 }
 
 void CoverageExporterJson::renderSegment(

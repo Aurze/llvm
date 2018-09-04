@@ -27,7 +27,6 @@
 #include "llvm/CodeGen/GlobalISel/RegBankSelect.h"
 #include "llvm/CodeGen/MachineScheduler.h"
 #include "llvm/CodeGen/Passes.h"
-#include "llvm/CodeGen/TargetLoweringObjectFile.h"
 #include "llvm/CodeGen/TargetPassConfig.h"
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/Function.h"
@@ -36,6 +35,7 @@
 #include "llvm/Support/CodeGen.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/TargetRegistry.h"
+#include "llvm/Target/TargetLoweringObjectFile.h"
 #include "llvm/Target/TargetOptions.h"
 #include "llvm/Transforms/Scalar.h"
 #include <memory>
@@ -210,14 +210,16 @@ static CodeModel::Model getEffectiveCodeModel(const Triple &TT,
                                               Optional<CodeModel::Model> CM,
                                               bool JIT) {
   if (CM) {
-    if (*CM != CodeModel::Small && *CM != CodeModel::Large) {
+    if (*CM != CodeModel::Small && *CM != CodeModel::Tiny &&
+        *CM != CodeModel::Large) {
       if (!TT.isOSFuchsia())
         report_fatal_error(
-            "Only small and large code models are allowed on AArch64");
-      else if (CM != CodeModel::Kernel)
-        report_fatal_error(
-            "Only small, kernel, and large code models are allowed on AArch64");
-    }
+            "Only small, tiny and large code models are allowed on AArch64");
+      else if (*CM != CodeModel::Kernel)
+        report_fatal_error("Only small, tiny, kernel, and large code models "
+                           "are allowed on AArch64");
+    } else if (*CM == CodeModel::Tiny && !TT.isOSBinFormatELF())
+      report_fatal_error("tiny code model is only supported on ELF");
     return *CM;
   }
   // The default MCJIT memory managers make no guarantees about where they can
@@ -243,6 +245,21 @@ AArch64TargetMachine::AArch64TargetMachine(const Target &T, const Triple &TT,
                         getEffectiveCodeModel(TT, CM, JIT), OL),
       TLOF(createTLOF(getTargetTriple())), isLittle(LittleEndian) {
   initAsmInfo();
+
+  if (TT.isOSBinFormatMachO()) {
+    this->Options.TrapUnreachable = true;
+    this->Options.NoTrapAfterNoreturn = true;
+  }
+
+  // Enable GlobalISel at or below EnableGlobalISelAt0.
+  if (getOptLevel() <= EnableGlobalISelAtO)
+    setGlobalISel(true);
+
+  // AArch64 supports the MachineOutliner.
+  setMachineOutliner(true);
+
+  // AArch64 supports default outlining behaviour.
+  setSupportsDefaultOutlining(true);
 }
 
 AArch64TargetMachine::~AArch64TargetMachine() = default;
@@ -340,8 +357,6 @@ public:
   void addPostRegAlloc() override;
   void addPreSched2() override;
   void addPreEmitPass() override;
-
-  bool isGlobalISelEnabled() const override;
 };
 
 } // end anonymous namespace
@@ -387,7 +402,7 @@ void AArch64PassConfig::addIRPasses() {
     // Call SeparateConstOffsetFromGEP pass to extract constants within indices
     // and lower a GEP with multiple indices to either arithmetic operations or
     // multiple GEPs with single index.
-    addPass(createSeparateConstOffsetFromGEPPass(TM, true));
+    addPass(createSeparateConstOffsetFromGEPPass(true));
     // Call EarlyCSE pass to find and remove subexpressions in the lowered
     // result.
     addPass(createEarlyCSEPass());
@@ -453,10 +468,6 @@ void AArch64PassConfig::addPreGlobalInstructionSelect() {
 bool AArch64PassConfig::addGlobalInstructionSelect() {
   addPass(new InstructionSelect());
   return false;
-}
-
-bool AArch64PassConfig::isGlobalISelEnabled() const {
-  return TM->getOptLevel() <= EnableGlobalISelAtO;
 }
 
 bool AArch64PassConfig::addILPOpts() {

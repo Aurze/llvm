@@ -35,7 +35,6 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/Instrumentation.h"
-#include "llvm/Transforms/Scalar.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/Transforms/Utils/ModuleUtils.h"
 
@@ -243,6 +242,7 @@ private:
   GlobalVariable *Function8bitCounterArray;  // for inline-8bit-counters.
   GlobalVariable *FunctionPCsArray;  // for pc-table.
   SmallVector<GlobalValue *, 20> GlobalsToAppendToUsed;
+  SmallVector<GlobalValue *, 20> GlobalsToAppendToCompilerUsed;
 
   SanitizerCoverageOptions Options;
 };
@@ -273,9 +273,20 @@ Function *SanitizerCoverageModule::CreateInitCallsForSections(
   auto SecStart = SecStartEnd.first;
   auto SecEnd = SecStartEnd.second;
   Function *CtorFunc;
+  Value *SecStartPtr = nullptr;
+  // Account for the fact that on windows-msvc __start_* symbols actually
+  // point to a uint64_t before the start of the array.
+  if (TargetTriple.getObjectFormat() == Triple::COFF) {
+    auto SecStartI8Ptr = IRB.CreatePointerCast(SecStart, Int8PtrTy);
+    auto GEP = IRB.CreateGEP(SecStartI8Ptr,
+                             ConstantInt::get(IntptrTy, sizeof(uint64_t)));
+    SecStartPtr = IRB.CreatePointerCast(GEP, Ty);
+  } else {
+    SecStartPtr = IRB.CreatePointerCast(SecStart, Ty);
+  }
   std::tie(CtorFunc, std::ignore) = createSanitizerCtorAndInitFunctions(
       M, SanCovModuleCtorName, InitFunctionName, {Ty, Ty},
-      {IRB.CreatePointerCast(SecStart, Ty), IRB.CreatePointerCast(SecEnd, Ty)});
+      {SecStartPtr, IRB.CreatePointerCast(SecEnd, Ty)});
 
   if (TargetTriple.supportsCOMDAT()) {
     // Use comdat to dedup CtorFunc.
@@ -397,14 +408,26 @@ bool SanitizerCoverageModule::runOnModule(Module &M) {
     Function *InitFunction = declareSanitizerInitFunction(
         M, SanCovPCsInitName, {IntptrPtrTy, IntptrPtrTy});
     IRBuilder<> IRBCtor(Ctor->getEntryBlock().getTerminator());
-    IRBCtor.CreateCall(InitFunction,
-                       {IRB.CreatePointerCast(SecStartEnd.first, IntptrPtrTy),
-                        IRB.CreatePointerCast(SecStartEnd.second, IntptrPtrTy)});
+    Value *SecStartPtr = nullptr;
+    // Account for the fact that on windows-msvc __start_pc_table actually
+    // points to a uint64_t before the start of the PC table.
+    if (TargetTriple.getObjectFormat() == Triple::COFF) {
+      auto SecStartI8Ptr = IRB.CreatePointerCast(SecStartEnd.first, Int8PtrTy);
+      auto GEP = IRB.CreateGEP(SecStartI8Ptr,
+                               ConstantInt::get(IntptrTy, sizeof(uint64_t)));
+      SecStartPtr = IRB.CreatePointerCast(GEP, IntptrPtrTy);
+    } else {
+      SecStartPtr = IRB.CreatePointerCast(SecStartEnd.first, IntptrPtrTy);
+    }
+    IRBCtor.CreateCall(
+        InitFunction,
+        {SecStartPtr, IRB.CreatePointerCast(SecStartEnd.second, IntptrPtrTy)});
   }
   // We don't reference these arrays directly in any of our runtime functions,
   // so we need to prevent them from being dead stripped.
   if (TargetTriple.isOSBinFormatMachO())
     appendToUsed(M, GlobalsToAppendToUsed);
+  appendToCompilerUsed(M, GlobalsToAppendToCompilerUsed);
   return true;
 }
 
@@ -479,6 +502,8 @@ bool SanitizerCoverageModule::runOnFunction(Function &F) {
   // initialization.
   if (F.getName() == "__local_stdio_printf_options" ||
       F.getName() == "__local_stdio_scanf_options")
+    return false;
+  if (isa<UnreachableInst>(F.getEntryBlock().getTerminator()))
     return false;
   // Don't instrument functions using SEH for now. Splitting basic blocks like
   // we do for coverage breaks WinEHPrepare.
@@ -588,15 +613,22 @@ void SanitizerCoverageModule::CreateFunctionLocalArrays(
     FunctionGuardArray = CreateFunctionLocalArrayInSection(
         AllBlocks.size(), F, Int32Ty, SanCovGuardsSectionName);
     GlobalsToAppendToUsed.push_back(FunctionGuardArray);
+    GlobalsToAppendToCompilerUsed.push_back(FunctionGuardArray);
+    MDNode *MD = MDNode::get(F.getContext(), ValueAsMetadata::get(&F));
+    FunctionGuardArray->addMetadata(LLVMContext::MD_associated, *MD);
   }
   if (Options.Inline8bitCounters) {
     Function8bitCounterArray = CreateFunctionLocalArrayInSection(
         AllBlocks.size(), F, Int8Ty, SanCovCountersSectionName);
-    GlobalsToAppendToUsed.push_back(Function8bitCounterArray);
+    GlobalsToAppendToCompilerUsed.push_back(Function8bitCounterArray);
+    MDNode *MD = MDNode::get(F.getContext(), ValueAsMetadata::get(&F));
+    Function8bitCounterArray->addMetadata(LLVMContext::MD_associated, *MD);
   }
   if (Options.PCTable) {
     FunctionPCsArray = CreatePCArray(F, AllBlocks);
-    GlobalsToAppendToUsed.push_back(FunctionPCsArray);
+    GlobalsToAppendToCompilerUsed.push_back(FunctionPCsArray);
+    MDNode *MD = MDNode::get(F.getContext(), ValueAsMetadata::get(&F));
+    FunctionPCsArray->addMetadata(LLVMContext::MD_associated, *MD);
   }
 }
 
@@ -659,11 +691,11 @@ void SanitizerCoverageModule::InjectTraceForSwitch(
           C = ConstantExpr::getCast(CastInst::ZExt, It.getCaseValue(), Int64Ty);
         Initializers.push_back(C);
       }
-      std::sort(Initializers.begin() + 2, Initializers.end(),
-                [](const Constant *A, const Constant *B) {
-                  return cast<ConstantInt>(A)->getLimitedValue() <
-                         cast<ConstantInt>(B)->getLimitedValue();
-                });
+      llvm::sort(Initializers.begin() + 2, Initializers.end(),
+                 [](const Constant *A, const Constant *B) {
+                   return cast<ConstantInt>(A)->getLimitedValue() <
+                          cast<ConstantInt>(B)->getLimitedValue();
+                 });
       ArrayType *ArrayOfInt64Ty = ArrayType::get(Int64Ty, Initializers.size());
       GlobalVariable *GV = new GlobalVariable(
           *CurModule, ArrayOfInt64Ty, false, GlobalVariable::InternalLinkage,
@@ -799,8 +831,13 @@ void SanitizerCoverageModule::InjectCoverageAtBlock(Function &F, BasicBlock &BB,
 
 std::string
 SanitizerCoverageModule::getSectionName(const std::string &Section) const {
-  if (TargetTriple.getObjectFormat() == Triple::COFF)
-    return ".SCOV$M";
+  if (TargetTriple.getObjectFormat() == Triple::COFF) {
+    if (Section == SanCovCountersSectionName)
+      return ".SCOV$CM";
+    if (Section == SanCovPCsSectionName)
+      return ".SCOVP$M";
+    return ".SCOV$GM"; // For SanCovGuardsSectionName.
+  }
   if (TargetTriple.isOSBinFormatMachO())
     return "__DATA,__" + Section;
   return "__" + Section;

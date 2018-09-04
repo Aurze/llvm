@@ -25,15 +25,16 @@ add_llvm_library(LLVMAnalysis
   Delinearization.cpp
   DemandedBits.cpp
   DependenceAnalysis.cpp
-  DivergenceAnalysis.cpp
   DomPrinter.cpp
   DominanceFrontier.cpp
   EHPersonalities.cpp
   GlobalsModRef.cpp
+  GuardUtils.cpp
   IVUsers.cpp
   IndirectCallPromotionAnalysis.cpp
   InlineCost.cpp
   InstCount.cpp
+  InstructionPrecedenceTracking.cpp
   InstructionSimplify.cpp
   Interval.cpp
   IntervalPartition.cpp
@@ -42,6 +43,7 @@ add_llvm_library(LLVMAnalysis
   LazyBlockFrequencyInfo.cpp
   LazyCallGraph.cpp
   LazyValueInfo.cpp
+  LegacyDivergenceAnalysis.cpp
   Lint.cpp
   Loads.cpp
   LoopAccessAnalysis.cpp
@@ -58,12 +60,15 @@ add_llvm_library(LLVMAnalysis
   MemorySSAUpdater.cpp
   ModuleDebugInfoPrinter.cpp
   ModuleSummaryAnalysis.cpp
+  MustExecute.cpp
   ObjCARCAliasAnalysis.cpp
   ObjCARCAnalysisUtils.cpp
   ObjCARCInstKind.cpp
   OptimizationRemarkEmitter.cpp
   OrderedBasicBlock.cpp
+  OrderedInstructions.cpp
   PHITransAddr.cpp
+  PhiValues.cpp
   PostDominators.cpp
   ProfileSummaryInfo.cpp
   PtrUseVisitor.cpp

@@ -98,6 +98,20 @@ namespace ARM_MB {
   }
 } // namespace ARM_MB
 
+namespace ARM_TSB {
+  enum TraceSyncBOpt {
+    CSYNC = 0
+  };
+
+  inline static const char *TraceSyncBOptToString(unsigned val) {
+    switch (val) {
+    default:
+      llvm_unreachable("Unknown trace synchronization barrier operation");
+      case CSYNC: return "csync";
+    }
+  }
+} // namespace ARM_TSB
+
 namespace ARM_ISB {
   enum InstSyncBOpt {
     RESERVED_0 = 0,
@@ -186,7 +200,8 @@ namespace ARMII {
     AddrModeT2_so   = 13,
     AddrModeT2_pc   = 14, // +/- i12 for pc relative data
     AddrModeT2_i8s4 = 15, // i8 * 4
-    AddrMode_i12    = 16
+    AddrMode_i12    = 16,
+    AddrMode5FP16   = 17  // i8 * 2
   };
 
   inline static const char *AddrModeToString(AddrMode addrmode) {
@@ -197,6 +212,7 @@ namespace ARMII {
     case AddrMode3:       return "AddrMode3";
     case AddrMode4:       return "AddrMode4";
     case AddrMode5:       return "AddrMode5";
+    case AddrMode5FP16:   return "AddrMode5FP16";
     case AddrMode6:       return "AddrMode6";
     case AddrModeT1_1:    return "AddrModeT1_1";
     case AddrModeT1_2:    return "AddrModeT1_2";
@@ -229,6 +245,11 @@ namespace ARMII {
     /// MO_OPTION_MASK - Most flags are mutually exclusive; this mask selects
     /// just that part of the flag set.
     MO_OPTION_MASK = 0x3,
+
+    /// MO_COFFSTUB - On a symbol operand "FOO", this indicates that the
+    /// reference is actually to the ".refptrp.FOO" symbol.  This is used for
+    /// stub symbols on windows.
+    MO_COFFSTUB = 0x4,
 
     /// MO_GOT - On a symbol operand, this represents a GOT relative relocation.
     MO_GOT = 0x8,

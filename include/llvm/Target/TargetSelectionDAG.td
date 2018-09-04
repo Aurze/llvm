@@ -217,22 +217,12 @@ def SDTIStore : SDTypeProfile<1, 3, [       // indexed store
 ]>;
 
 def SDTMaskedStore: SDTypeProfile<0, 3, [       // masked store
-  SDTCisPtrTy<0>, SDTCisVec<1>, SDTCisVec<2>, SDTCisSameNumEltsAs<1, 2>
+  SDTCisVec<0>, SDTCisPtrTy<1>, SDTCisVec<2>, SDTCisSameNumEltsAs<0, 2>
 ]>;
 
 def SDTMaskedLoad: SDTypeProfile<1, 3, [       // masked load
   SDTCisVec<0>, SDTCisPtrTy<1>, SDTCisVec<2>, SDTCisSameAs<0, 3>,
   SDTCisSameNumEltsAs<0, 2>
-]>;
-
-def SDTMaskedGather: SDTypeProfile<2, 3, [       // masked gather
-  SDTCisVec<0>, SDTCisVec<1>, SDTCisSameAs<0, 2>, SDTCisSameAs<1, 3>,
-  SDTCisPtrTy<4>, SDTCVecEltisVT<1, i1>, SDTCisSameNumEltsAs<0, 1>
-]>;
-
-def SDTMaskedScatter: SDTypeProfile<1, 3, [       // masked scatter
-  SDTCisVec<0>, SDTCisVec<1>, SDTCisSameAs<0, 2>, SDTCisSameNumEltsAs<0, 1>,
-  SDTCVecEltisVT<0, i1>, SDTCisPtrTy<3>
 ]>;
 
 def SDTVecShuffle : SDTypeProfile<1, 2, [
@@ -485,6 +475,8 @@ def atomic_load_sub : SDNode<"ISD::ATOMIC_LOAD_SUB" , SDTAtomic2,
                     [SDNPHasChain, SDNPMayStore, SDNPMayLoad, SDNPMemOperand]>;
 def atomic_load_and : SDNode<"ISD::ATOMIC_LOAD_AND" , SDTAtomic2,
                     [SDNPHasChain, SDNPMayStore, SDNPMayLoad, SDNPMemOperand]>;
+def atomic_load_clr : SDNode<"ISD::ATOMIC_LOAD_CLR" , SDTAtomic2,
+                    [SDNPHasChain, SDNPMayStore, SDNPMayLoad, SDNPMemOperand]>;
 def atomic_load_or  : SDNode<"ISD::ATOMIC_LOAD_OR" , SDTAtomic2,
                     [SDNPHasChain, SDNPMayStore, SDNPMayLoad, SDNPMemOperand]>;
 def atomic_load_xor : SDNode<"ISD::ATOMIC_LOAD_XOR" , SDTAtomic2,
@@ -507,10 +499,6 @@ def atomic_store     : SDNode<"ISD::ATOMIC_STORE", SDTAtomicStore,
 def masked_store : SDNode<"ISD::MSTORE",  SDTMaskedStore,
                        [SDNPHasChain, SDNPMayStore, SDNPMemOperand]>;
 def masked_load  : SDNode<"ISD::MLOAD",  SDTMaskedLoad,
-                       [SDNPHasChain, SDNPMayLoad, SDNPMemOperand]>;
-def masked_scatter : SDNode<"ISD::MSCATTER",  SDTMaskedScatter,
-                       [SDNPHasChain, SDNPMayStore, SDNPMemOperand]>;
-def masked_gather  : SDNode<"ISD::MGATHER",  SDTMaskedGather,
                        [SDNPHasChain, SDNPMayLoad, SDNPMemOperand]>;
 
 // Do not use ld, st directly. Use load, extload, sextload, zextload, store,
@@ -613,14 +601,18 @@ class CodePatPred<code predicate> : PatPred {
 // compact and readable.
 //
 
-/// PatFrag - Represents a pattern fragment.  This can match something on the
-/// DAG, from a single node to multiple nested other fragments.
+/// PatFrags - Represents a set of pattern fragments.  Each single fragment
+/// can match something on the DAG, from a single node to multiple nested other
+/// fragments.   The whole set of fragments matches if any of the single
+/// fragemnts match.  This allows e.g. matching and "add with overflow" and
+/// a regular "add" with the same fragment set.
 ///
-class PatFrag<dag ops, dag frag, code pred = [{}],
-              SDNodeXForm xform = NOOP_SDNodeXForm> : SDPatternOperator {
+class PatFrags<dag ops, list<dag> frags, code pred = [{}],
+               SDNodeXForm xform = NOOP_SDNodeXForm> : SDPatternOperator {
   dag Operands = ops;
-  dag Fragment = frag;
+  list<dag> Fragments = frags;
   code PredicateCode = pred;
+  code GISelPredicateCode = [{}];
   code ImmediateCode = [{}];
   SDNodeXForm OperandTransform = xform;
 
@@ -678,6 +670,11 @@ class PatFrag<dag ops, dag frag, code pred = [{}],
   // cast<StoreSDNode>(N)->getMemoryVT().getScalarType() == MVT::<VT>;
   ValueType ScalarMemoryVT = ?;
 }
+
+// PatFrag - A version of PatFrags matching only a single fragment.
+class PatFrag<dag ops, dag frag, code pred = [{}],
+              SDNodeXForm xform = NOOP_SDNodeXForm>
+  : PatFrags<ops, [frag], pred, xform>;
 
 // OutPatFrag is a pattern fragment that is used as part of an output pattern
 // (not an input pattern). These do not have predicates or transforms, but are
@@ -1056,6 +1053,15 @@ def post_truncstf32 : PatFrag<(ops node:$val, node:$base, node:$offset),
   let MemoryVT = f32;
 }
 
+def nonvolatile_load : PatFrag<(ops node:$ptr),
+                               (load node:$ptr), [{
+  return !cast<LoadSDNode>(N)->isVolatile();
+}]>;
+def nonvolatile_store : PatFrag<(ops node:$val, node:$ptr),
+                                (store node:$val, node:$ptr), [{
+  return !cast<StoreSDNode>(N)->isVolatile();
+}]>;
+
 // nontemporal store fragments.
 def nontemporalstore : PatFrag<(ops node:$val, node:$ptr),
                                (store node:$val, node:$ptr), [{
@@ -1130,27 +1136,27 @@ def setne  : PatFrag<(ops node:$lhs, node:$rhs),
 
 multiclass binary_atomic_op_ord<SDNode atomic_op> {
   def #NAME#_monotonic : PatFrag<(ops node:$ptr, node:$val),
-      (!cast<SDNode>(#NAME) node:$ptr, node:$val)> {
+      (!cast<SDPatternOperator>(#NAME) node:$ptr, node:$val)> {
     let IsAtomic = 1;
     let IsAtomicOrderingMonotonic = 1;
   }
   def #NAME#_acquire : PatFrag<(ops node:$ptr, node:$val),
-      (!cast<SDNode>(#NAME) node:$ptr, node:$val)> {
+      (!cast<SDPatternOperator>(#NAME) node:$ptr, node:$val)> {
     let IsAtomic = 1;
     let IsAtomicOrderingAcquire = 1;
   }
   def #NAME#_release : PatFrag<(ops node:$ptr, node:$val),
-      (!cast<SDNode>(#NAME) node:$ptr, node:$val)> {
+      (!cast<SDPatternOperator>(#NAME) node:$ptr, node:$val)> {
     let IsAtomic = 1;
     let IsAtomicOrderingRelease = 1;
   }
   def #NAME#_acq_rel : PatFrag<(ops node:$ptr, node:$val),
-      (!cast<SDNode>(#NAME) node:$ptr, node:$val)> {
+      (!cast<SDPatternOperator>(#NAME) node:$ptr, node:$val)> {
     let IsAtomic = 1;
     let IsAtomicOrderingAcquireRelease = 1;
   }
   def #NAME#_seq_cst : PatFrag<(ops node:$ptr, node:$val),
-      (!cast<SDNode>(#NAME) node:$ptr, node:$val)> {
+      (!cast<SDPatternOperator>(#NAME) node:$ptr, node:$val)> {
     let IsAtomic = 1;
     let IsAtomicOrderingSequentiallyConsistent = 1;
   }
@@ -1158,27 +1164,27 @@ multiclass binary_atomic_op_ord<SDNode atomic_op> {
 
 multiclass ternary_atomic_op_ord<SDNode atomic_op> {
   def #NAME#_monotonic : PatFrag<(ops node:$ptr, node:$cmp, node:$val),
-      (!cast<SDNode>(#NAME) node:$ptr, node:$cmp, node:$val)> {
+      (!cast<SDPatternOperator>(#NAME) node:$ptr, node:$cmp, node:$val)> {
     let IsAtomic = 1;
     let IsAtomicOrderingMonotonic = 1;
   }
   def #NAME#_acquire : PatFrag<(ops node:$ptr, node:$cmp, node:$val),
-      (!cast<SDNode>(#NAME) node:$ptr, node:$cmp, node:$val)> {
+      (!cast<SDPatternOperator>(#NAME) node:$ptr, node:$cmp, node:$val)> {
     let IsAtomic = 1;
     let IsAtomicOrderingAcquire = 1;
   }
   def #NAME#_release : PatFrag<(ops node:$ptr, node:$cmp, node:$val),
-      (!cast<SDNode>(#NAME) node:$ptr, node:$cmp, node:$val)> {
+      (!cast<SDPatternOperator>(#NAME) node:$ptr, node:$cmp, node:$val)> {
     let IsAtomic = 1;
     let IsAtomicOrderingRelease = 1;
   }
   def #NAME#_acq_rel : PatFrag<(ops node:$ptr, node:$cmp, node:$val),
-      (!cast<SDNode>(#NAME) node:$ptr, node:$cmp, node:$val)> {
+      (!cast<SDPatternOperator>(#NAME) node:$ptr, node:$cmp, node:$val)> {
     let IsAtomic = 1;
     let IsAtomicOrderingAcquireRelease = 1;
   }
   def #NAME#_seq_cst : PatFrag<(ops node:$ptr, node:$cmp, node:$val),
-      (!cast<SDNode>(#NAME) node:$ptr, node:$cmp, node:$val)> {
+      (!cast<SDPatternOperator>(#NAME) node:$ptr, node:$cmp, node:$val)> {
     let IsAtomic = 1;
     let IsAtomicOrderingSequentiallyConsistent = 1;
   }
@@ -1244,6 +1250,7 @@ defm atomic_load_add  : binary_atomic_op<atomic_load_add>;
 defm atomic_swap      : binary_atomic_op<atomic_swap>;
 defm atomic_load_sub  : binary_atomic_op<atomic_load_sub>;
 defm atomic_load_and  : binary_atomic_op<atomic_load_and>;
+defm atomic_load_clr  : binary_atomic_op<atomic_load_clr>;
 defm atomic_load_or   : binary_atomic_op<atomic_load_or>;
 defm atomic_load_xor  : binary_atomic_op<atomic_load_xor>;
 defm atomic_load_nand : binary_atomic_op<atomic_load_nand>;

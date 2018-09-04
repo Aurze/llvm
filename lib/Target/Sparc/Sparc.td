@@ -130,7 +130,7 @@ def : Processor<"leon2", LEON2Itineraries,
 // LEON 2 FT (AT697E)
 // TO DO: Place-holder: Processor specific features will be added *very* soon here.
 def : Processor<"at697e", LEON2Itineraries,
-                [FeatureLeon, ReplaceSDIV, InsertNOPLoad]>;
+                [FeatureLeon, InsertNOPLoad]>;
 
 // LEON 2 FT (AT697F)
 // TO DO: Place-holder: Processor specific features will be added *very* soon here.
@@ -159,7 +159,7 @@ def : Processor<"leon4", LEON4Itineraries,
 // LEON 4 FT (GR740) 
 // TO DO: Place-holder: Processor specific features will be added *very* soon here.
 def : Processor<"gr740", LEON4Itineraries, 
-                [FeatureLeon, UMACSMACSupport, LeonCASA]>;
+                [FeatureLeon, UMACSMACSupport, LeonCASA, LeonCycleCounter]>;
 
 //===----------------------------------------------------------------------===//
 // Declare the target which we are implementing
@@ -176,4 +176,5 @@ def Sparc : Target {
   let InstructionSet = SparcInstrInfo;
   let AssemblyParsers  = [SparcAsmParser];
   let AssemblyWriters = [SparcAsmWriter];
+  let AllowRegisterRenaming = 1;
 }
